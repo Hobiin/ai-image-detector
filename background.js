@@ -15,30 +15,17 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
     chrome.scripting.executeScript({
       target: { tabId: tab.id },
       func: () => {
-        // Hapus card lama jika ada
         const existing = document.getElementById("ai-detector-card");
         if (existing) existing.remove();
 
-        // Buat elemen card baru untuk loading
         const card = document.createElement("div");
         card.id = "ai-detector-card";
         card.style.cssText = `
-          position: fixed;
-          top: 20px;
-          right: 20px;
-          z-index: 999999;
-          background: #1e1e2f;
-          color: #fff;
-          padding: 15px 20px;
-          border-radius: 12px;
-          box-shadow: 0 10px 25px rgba(0,0,0,0.3);
-          font-family: Arial, sans-serif;
-          font-size: 14px;
-          display: flex;
-          align-items: center;
-          gap: 12px;
-          border-left: 5px solid #6366f1;
-          animation: fadeIn 0.3s ease-in-out;
+          position: fixed; top: 20px; right: 20px; z-index: 999999;
+          background: #1e1e2f; color: #fff; padding: 15px 20px; border-radius: 12px;
+          box-shadow: 0 10px 25px rgba(0,0,0,0.3); font-family: Arial, sans-serif;
+          font-size: 14px; display: flex; align-items: center; gap: 12px;
+          border-left: 5px solid #6366f1; animation: fadeIn 0.3s ease-in-out;
         `;
         card.innerHTML = `
           <div style="width: 18px; height: 18px; border: 3px solid #ccc; border-top-color: #6366f1; border-radius: 50%; animation: spin 1s linear infinite;"></div>
@@ -48,7 +35,6 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
           </div>
         `;
         
-        // Tambahkan animasi CSS mutar untuk spinner
         const style = document.createElement("style");
         style.innerHTML = `@keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }`;
         document.head.appendChild(style);
@@ -59,23 +45,20 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
     // 2. Kirim URL ke Server Python Flask
     fetch("http://localhost:5000/detect", {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json"
-      },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ imageUrl: imageUrl })
     })
     .then(response => response.json())
     .then(data => {
-      // 3. Perbarui Floating Card dengan Hasil Deteksi dari Server
+      // 3. Update Floating Card & Tempelkan Badge Langsung di Atas Gambar
       chrome.scripting.executeScript({
         target: { tabId: tab.id },
-        func: (pesan) => {
+        func: (pesan, targetUrl) => {
+          // Update Floating Card
           const card = document.getElementById("ai-detector-card");
           if (card) {
-            // Tentukan warna border berdasarkan hasil (misal: merah jika AI, hijau jika asli)
             const isAI = pesan.includes("Buatan AI");
             card.style.borderLeftColor = isAI ? "#ef4444" : "#22c55e";
-            
             card.innerHTML = `
               <div style="flex-grow: 1;">
                 <div style="font-weight: bold; margin-bottom: 4px; display: flex; justify-content: space-between; align-items: center;">
@@ -85,21 +68,54 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
                 <div style="color: #f8fafc; font-size: 13px; line-height: 1.4;">${pesan}</div>
               </div>
             `;
-            
             document.getElementById("close-ai-card").onclick = () => card.remove();
-            
-            // Otomatis hilang setelah 7 detik
-            setTimeout(() => {
-              if (card) card.remove();
-            }, 7000);
+            setTimeout(() => { if (card) card.remove(); }, 8000);
           }
+
+          // Tempelkan Badge Langsung di Sudut Gambar
+          const images = document.querySelectorAll("img");
+          images.forEach(img => {
+            if (img.src === targetUrl || img.currentSrc === targetUrl) {
+              const rect = img.getBoundingClientRect();
+              const badge = document.createElement("div");
+              const isAI = pesan.includes("Buatan AI");
+              badge.style.cssText = `
+                position: absolute;
+                top: ${window.scrollY + rect.top + 8}px;
+                left: ${window.scrollX + rect.left + 8}px;
+                z-index: 999998;
+                background: ${isAI ? 'rgba(239, 68, 68, 0.95)' : 'rgba(34, 197, 94, 0.95)'};
+                color: white;
+                padding: 5px 10px;
+                border-radius: 6px;
+                font-size: 11px;
+                font-weight: bold;
+                font-family: Arial, sans-serif;
+                box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+                pointer-events: none;
+              `;
+              badge.innerText = isAI ? "🤖 AI Generated" : "✅ Real Photo";
+              document.body.appendChild(badge);
+            }
+          });
         },
-        args: [data.message]
+        args: [data.message, imageUrl]
       });
+
+      // 4. Simpan ke Riwayat Chrome Storage
+      chrome.storage.local.get({ detectionHistory: [] }, (storageData) => {
+        const history = storageData.detectionHistory;
+        history.push({
+          imageUrl: imageUrl,
+          message: data.message
+        });
+        if (history.length > 20) history.shift(); // Maksimal simpan 20 riwayat terakhir
+        chrome.storage.local.set({ detectionHistory: history });
+      });
+
     })
     .catch(error => {
       console.error("Error:", error);
-      // Tampilkan error jika gagal terhubung ke server
       chrome.scripting.executeScript({
         target: { tabId: tab.id },
         func: () => {
